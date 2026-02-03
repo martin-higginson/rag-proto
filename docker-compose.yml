@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  # Ollama service for local LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-proto-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Main RAG application
+  rag-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-proto-app
+    ports:
+      - "7860:7860"
+    environment:
+      # Git Configuration
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      - GITLAB_REPO_URL=${GITLAB_REPO_URL:-https://gitlab.com/your-username/your-repo.git}
+      - GITLAB_BRANCH=${GITLAB_BRANCH:-main}
+      - KB_FOLDER=/app/knowledge-base
+
+      # RAG Configuration
+      - MODEL=${MODEL:-llama3.2}
+      - DB_NAME=/app/vector_db
+      - USE_OPENAI_EMBEDDINGS=${USE_OPENAI_EMBEDDINGS:-false}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CHUNK_SIZE=${CHUNK_SIZE:-2000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-500}
+      - RETRIEVER_K=${RETRIEVER_K:-25}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
+      - FORCE_REFRESH_DB=${FORCE_REFRESH_DB:-false}
+
+      # Server Configuration
+      - SERVER_PORT=7860
+      - SERVER_HOST=0.0.0.0
+      - OPEN_BROWSER=false
+      - SHARE_GRADIO=false
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # Ollama endpoint (internal network)
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      # Persist knowledge base and vector database
+      - kb_data:/app/knowledge-base
+      - vector_db:/app/vector_db
+      # Mount source code for development (optional)
+      - ./libs:/app/libs
+      - ./main.py:/app/main.py
+    networks:
+      - rag-network
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+    driver: local
+  kb_data:
+    driver: local
+  vector_db:
+    driver: local
+
+networks:
+  rag-network:
+    driver: bridge
